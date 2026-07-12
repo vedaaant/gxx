@@ -1,0 +1,77 @@
+"""Central configuration for the watcher + understanding layer.
+
+Values are overridable via environment variables so the installer and the Hermes
+MCP `env` block can tune them without code changes.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+
+def _env(name: str, default: str) -> str:
+    return os.environ.get(name, default)
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+# -- paths --------------------------------------------------------------------
+def data_dir() -> Path:
+    """Where the store lives. Defaults under Hermes' config dir on Windows."""
+    explicit = os.environ.get("CONTOUR_DATA_DIR")
+    if explicit:
+        return Path(os.path.expandvars(explicit)).expanduser()
+    base = os.environ.get("LOCALAPPDATA")
+    if base:
+        return Path(base) / "hermes" / "contour"
+    return Path.home() / ".hermes" / "contour"
+
+
+# -- models -------------------------------------------------------------------
+VISION_MODEL = _env("CONTOUR_VISION_MODEL", "gemma4:e4b")   # doc gemma4:12b as upgrade
+EMBED_MODEL = _env("CONTOUR_EMBED_MODEL", "nomic-embed-text")
+EMBED_DIM = _env_int("CONTOUR_EMBED_DIM", 768)
+OLLAMA_HOST = _env("OLLAMA_HOST", "http://127.0.0.1:11434")
+
+# -- capture / trigger tuning -------------------------------------------------
+VISUAL_CHECK_INTERVAL = _env_float("CONTOUR_VISUAL_CHECK_INTERVAL", 3.0)   # seconds
+VISUAL_CHANGE_THRESHOLD = _env_float("CONTOUR_VISUAL_CHANGE_THRESHOLD", 0.05)
+FOREGROUND_POLL_INTERVAL = _env_float("CONTOUR_FOREGROUND_POLL", 0.7)      # seconds
+TYPING_PAUSE_SECS = _env_float("CONTOUR_TYPING_PAUSE", 2.0)
+IDLE_SECS = _env_float("CONTOUR_IDLE_SECS", 30.0)
+HEARTBEAT_SECS = _env_int("CONTOUR_HEARTBEAT_SECS", 30)
+DOWNSCALE_FACTOR = _env_int("CONTOUR_DOWNSCALE", 4)
+
+# "thin" accessibility-text heuristic (screenpipe): escalate to vision below these.
+THIN_MIN_CHARS = _env_int("CONTOUR_THIN_MIN_CHARS", 100)
+THIN_CONTENT_RATIO = _env_float("CONTOUR_THIN_CONTENT_RATIO", 0.3)
+
+# Apps whose UIA text is empty/noisy => always take the vision path.
+PREFER_VISION_APPS = {
+    a.strip().lower()
+    for a in _env(
+        "CONTOUR_PREFER_VISION_APPS",
+        "windowsterminal,cmd,powershell,wt,alacritty,figma,photoshop,mspaint",
+    ).split(",")
+    if a.strip()
+}
+
+# Trigger classification (hard = always store; soft = dedup-eligible).
+HARD_TRIGGERS = {"AppSwitch", "WindowFocus", "Idle", "Manual"}
+SOFT_TRIGGERS = {"TypingPause", "KeyPress", "Clipboard", "VisualChange", "ScrollStop"}
+
+# -- proactivity --------------------------------------------------------------
+INTERJECTION_COOLDOWN_SECS = _env_int("CONTOUR_INTERJECTION_COOLDOWN", 60)

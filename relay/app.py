@@ -1,0 +1,254 @@
+"""contour relay — FastAPI proxy for web search + opt-in cloud LLM.
+
+Zero-key client story: the client authenticates with a per-device token and never
+holds a provider key. The relay holds project-owned keys in env vars, applies a
+server-side PII backstop, and rate-limits per token.
+
+Endpoints:
+    GET  /health            -> liveness + which providers are configured
+    POST /search  {query,num_results}  -> {results:[{title,url,snippet}]}
+    POST /cloud   {prompt,system}       -> {answer}   (opt-in on the client)
+    POST /tts                            -> 501 (voice uses Hermes' free Edge TTS)
+
+Provider calls (`do_search`, `do_cloud`) are module-level so tests can monkeypatch
+them without real keys or network.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from pydantic import BaseModel
+
+# ElevenLabs PCM output format the client knows how to play (mono 16-bit LE).
+TTS_SAMPLE_RATE = 16000
+TTS_OUTPUT_FORMAT = "pcm_16000"
+
+from relay.auth import AuthError, AuthStore
+from relay.pii import scrub
+from relay.ratelimit import RateLimiter
+
+log = logging.getLogger("contour.relay.app")
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_WEBSITE = _PROJECT_ROOT / "website" / "index.html"
+_INSTALLER = _PROJECT_ROOT / "install" / "install.ps1"
+
+
+class SearchReq(BaseModel):
+    query: str
+    num_results: int = 5
+
+
+class CloudReq(BaseModel):
+    prompt: str
+    system: str = ""
+
+
+class TTSReq(BaseModel):
+    text: str
+    voice_id: str = ""
+
+
+class Credentials(BaseModel):
+    email: str
+    password: str
+
+
+def _allowed_tokens() -> set[str]:
+    raw = os.environ.get("CONTOUR_RELAY_TOKENS", "")
+    return {t.strip() for t in raw.split(",") if t.strip()}
+
+
+# -- provider adapters (monkeypatched in tests) ------------------------------
+def do_search(query: str, num_results: int) -> list[dict]:
+    """Call the configured search provider (Linkup preferred, then Tavily, then Serper)."""
+    import httpx
+
+    linkup = os.environ.get("LINKUP_API_KEY")
+    if linkup:
+        r = httpx.post(
+            "https://api.linkup.so/v1/search",
+            headers={"Authorization": f"Bearer {linkup}"},
+            json={
+                "q": query,
+                "depth": os.environ.get("LINKUP_DEPTH", "standard"),  # fast|standard|deep
+                "outputType": "searchResults",
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        results = [x for x in r.json().get("results", []) if x.get("type") != "image"]
+        return [
+            {"title": x.get("name", ""), "url": x.get("url", ""), "snippet": x.get("content", "")}
+            for x in results[:num_results]
+        ]
+
+    tavily = os.environ.get("TAVILY_API_KEY")
+    if tavily:
+        r = httpx.post(
+            "https://api.tavily.com/search",
+            json={"api_key": tavily, "query": query, "max_results": num_results},
+            timeout=20,
+        )
+        r.raise_for_status()
+        return [
+            {"title": x.get("title", ""), "url": x.get("url", ""), "snippet": x.get("content", "")}
+            for x in r.json().get("results", [])
+        ]
+
+    serper = os.environ.get("SERPER_API_KEY")
+    if serper:
+        r = httpx.post(
+            "https://google.serper.dev/search",
+            headers={"X-API-KEY": serper},
+            json={"q": query, "num": num_results},
+            timeout=20,
+        )
+        r.raise_for_status()
+        return [
+            {"title": x.get("title", ""), "url": x.get("link", ""), "snippet": x.get("snippet", "")}
+            for x in r.json().get("organic", [])
+        ]
+
+    raise HTTPException(status_code=503, detail="no search provider configured")
+
+
+def do_cloud(prompt: str, system: str) -> str:
+    """Call the configured cloud LLM (OpenAI)."""
+    import httpx
+
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(status_code=503, detail="no cloud provider configured")
+    model = os.environ.get("CONTOUR_CLOUD_MODEL", "gpt-4o-mini")
+    messages = ([{"role": "system", "content": system}] if system else []) + [
+        {"role": "user", "content": prompt}
+    ]
+    r = httpx.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"model": model, "messages": messages},
+        timeout=60,
+    )
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"]
+
+
+def do_tts(text: str, voice_id: str) -> bytes:
+    """Synthesize speech via ElevenLabs; returns raw PCM16 mono @ 16 kHz."""
+    import httpx
+
+    key = os.environ.get("ELEVENLABS_API_KEY")
+    if not key:
+        raise HTTPException(status_code=503, detail="no TTS provider configured")
+    vid = voice_id or os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+    model = os.environ.get("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
+    r = httpx.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
+        params={"output_format": TTS_OUTPUT_FORMAT},
+        headers={"xi-api-key": key, "content-type": "application/json"},
+        json={"text": text, "model_id": model},
+        timeout=60,
+    )
+    r.raise_for_status()
+    return r.content
+
+
+def create_app(
+    tokens: set[str] | None = None,
+    limiter: RateLimiter | None = None,
+    auth_store: AuthStore | None = None,
+) -> FastAPI:
+    app = FastAPI(title="contour relay", version="0.1.0")
+    allowed = tokens if tokens is not None else _allowed_tokens()
+    store = auth_store if auth_store is not None else AuthStore()
+    rl = limiter or RateLimiter(
+        max_requests=int(os.environ.get("CONTOUR_RELAY_RATE", "120")), window_secs=60.0
+    )
+    # auth is enforced when either a static allowlist or accounts exist
+    require_auth = bool(allowed) or store is not None
+
+    def auth(authorization: str = Header(default="")) -> str:
+        token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+        if require_auth:
+            ok = (token in allowed) or (store is not None and store.valid_token(token))
+            if not ok:
+                raise HTTPException(status_code=401, detail="invalid device token")
+        if not rl.allow(token or "anon"):
+            raise HTTPException(status_code=429, detail="rate limit exceeded")
+        return token
+
+    @app.post("/signup")
+    def signup(creds: Credentials) -> dict:
+        try:
+            token = store.signup(creds.email, creds.password)
+        except AuthError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return {"ok": True, "token": token}
+
+    @app.post("/login")
+    def login(creds: Credentials) -> dict:
+        try:
+            token = store.login(creds.email, creds.password)
+        except AuthError as e:
+            raise HTTPException(status_code=401, detail=str(e)) from e
+        return {"ok": True, "token": token}
+
+    @app.get("/", response_class=HTMLResponse)
+    def dashboard() -> str:
+        if _WEBSITE.exists():
+            return _WEBSITE.read_text(encoding="utf-8")
+        return "<h1>contour relay</h1><p>dashboard not found</p>"
+
+    @app.get("/download/install.ps1")
+    def download_installer():
+        if not _INSTALLER.exists():
+            raise HTTPException(status_code=404, detail="installer not found")
+        return FileResponse(
+            _INSTALLER, media_type="text/plain", filename="install.ps1"
+        )
+
+    @app.get("/health")
+    def health() -> dict:
+        return {
+            "ok": True,
+            "providers": {
+                "search": bool(
+                    os.environ.get("LINKUP_API_KEY")
+                    or os.environ.get("TAVILY_API_KEY")
+                    or os.environ.get("SERPER_API_KEY")
+                ),
+                "cloud": bool(os.environ.get("OPENAI_API_KEY")),
+                "tts": bool(os.environ.get("ELEVENLABS_API_KEY")),
+            },
+            "auth_required": bool(allowed),
+        }
+
+    @app.post("/search")
+    def search(req: SearchReq, token: str = Depends(auth)) -> dict:
+        results = do_search(scrub(req.query), req.num_results)  # server-side backstop scrub
+        return {"results": results}
+
+    @app.post("/cloud")
+    def cloud(req: CloudReq, token: str = Depends(auth)) -> dict:
+        answer = do_cloud(scrub(req.prompt), scrub(req.system))
+        return {"answer": answer}
+
+    @app.post("/tts")
+    def tts(req: TTSReq, token: str = Depends(auth)) -> Response:
+        audio = do_tts(scrub(req.text), req.voice_id)  # server-side scrub backstop
+        return Response(
+            content=audio,
+            media_type="application/octet-stream",
+            headers={"X-Sample-Rate": str(TTS_SAMPLE_RATE)},
+        )
+
+    return app
+
+
+app = create_app()

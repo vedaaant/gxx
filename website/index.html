@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>contour — building the contour for your dense brain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#ffffff; --ink:#0a0a0a; --ink-soft:#242424; --muted:#6b6b6b;
+    --line:#e7e7e7; --line-strong:#111; --field:#fafafa; --ok:#12734f;
+    --serif:"Instrument Serif",Georgia,serif;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --maxw:1120px;
+    --pad:clamp(20px,5vw,64px);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--mono);
+    font-weight:400; line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:#000;color:#fff}
+  a{color:inherit}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding-inline:var(--pad)}
+
+  /* ---- nav ---- */
+  .nav{border-bottom:1px solid var(--line)}
+  .nav .wrap{display:flex; align-items:center; justify-content:space-between; height:68px; gap:20px}
+  .brand{display:flex; align-items:baseline; gap:9px}
+  .brand .mark{font-family:var(--serif); font-size:27px; letter-spacing:.4px; line-height:1}
+  .brand .dot{width:6px;height:6px;border-radius:50%;background:var(--ink);display:inline-block;transform:translateY(-2px)}
+  .navlinks{display:flex; gap:26px; align-items:center; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted)}
+  .navlinks a{text-decoration:none}
+  .navlinks a:hover{color:var(--ink)}
+  @media (max-width:640px){ .navlinks{display:none} }
+
+  /* ---- hero: two columns ---- */
+  .hero{display:grid; grid-template-columns:1.05fr 0.95fr; gap:clamp(36px,6vw,88px);
+        align-items:start; padding-block:clamp(52px,9vh,104px)}
+  @media (max-width:880px){ .hero{grid-template-columns:1fr; padding-block:44px} }
+
+  .eyebrow{font-size:11px; letter-spacing:.24em; text-transform:uppercase; color:var(--muted); margin:0 0 20px}
+  h1.head{font-family:var(--serif); font-size:clamp(40px,5.6vw,64px); line-height:1.03;
+           text-wrap:balance; margin:0 0 22px; font-weight:400}
+  h1.head em{font-style:italic}
+  .lede{color:var(--ink-soft); font-size:15px; line-height:1.65; margin:0 0 34px; max-width:46ch}
+
+  .feats{list-style:none; margin:0; padding:0; display:flex; flex-direction:column}
+  .feats li{padding:16px 0; border-top:1px solid var(--line); display:grid;
+            grid-template-columns:150px 1fr; gap:16px; align-items:baseline}
+  .feats li:last-child{border-bottom:1px solid var(--line)}
+  .feats .flabel{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink)}
+  .feats .fdesc{font-size:13px; color:var(--muted); line-height:1.55}
+  @media (max-width:520px){ .feats li{grid-template-columns:1fr; gap:5px} }
+
+  /* ---- card (auth + dashboard) ---- */
+  .card{border:1px solid var(--line); background:var(--bg); align-self:start}
+  .card > *{padding-inline:24px}
+  .seg{display:flex; border-bottom:1px solid var(--line)}
+  .seg button{flex:1; appearance:none; background:none; border:0; cursor:pointer;
+    font-family:var(--mono); font-size:11px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--muted); padding:16px 0; border-bottom:2px solid transparent; margin-bottom:-1px}
+  .seg button[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--line-strong)}
+  .seg button:focus-visible{outline:2px solid var(--ink); outline-offset:-4px}
+
+  form{display:flex; flex-direction:column; gap:16px; padding-block:24px}
+  label{display:flex; flex-direction:column; gap:7px; font-size:11px; letter-spacing:.16em;
+         text-transform:uppercase; color:var(--muted)}
+  input{font-family:var(--mono); font-size:14px; color:var(--ink); background:var(--field);
+    border:1px solid var(--line); padding:12px 14px; width:100%}
+  input:focus{outline:none; border-color:var(--line-strong); background:#fff}
+  .btn{font-family:var(--mono); font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+    background:var(--ink); color:#fff; border:1px solid var(--ink); padding:14px 16px;
+    cursor:pointer; transition:opacity .15s ease; text-decoration:none; text-align:center; display:inline-block}
+  .btn:hover{opacity:.82}
+  .btn:disabled{opacity:.4; cursor:not-allowed}
+  .btn.ghost{background:none; color:var(--ink)}
+  .btn.ghost:hover{background:#000; color:#fff; opacity:1}
+  .btn:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+  .msg{font-size:12px; min-height:16px; color:#a01414}
+  .msg.ok{color:var(--ok)}
+
+  /* dashboard state */
+  .panel{display:none; flex-direction:column}
+  .panel.show{display:flex}
+  .row{display:flex; flex-direction:column; gap:8px; padding-block:20px; border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .k{font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--muted)}
+  .val{display:flex; align-items:stretch; border:1px solid var(--line); background:var(--field)}
+  .val code{flex:1; padding:11px 13px; font-size:12.5px; overflow-x:auto; white-space:nowrap; color:var(--ink-soft)}
+  .copy{border:0; border-left:1px solid var(--line); background:#fff; cursor:pointer; font-family:var(--mono);
+    font-size:10px; letter-spacing:.14em; text-transform:uppercase; padding:0 14px; color:var(--muted)}
+  .copy:hover{background:#000;color:#fff}
+  .who{display:flex; align-items:center; justify-content:space-between; gap:12px}
+  .pill{display:inline-flex; align-items:center; gap:7px; font-size:11px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--ok)}
+  .pill::before{content:""; width:7px;height:7px;border-radius:50%; background:var(--ok)}
+  .steps{margin:0; padding-left:0; list-style:none; counter-reset:s; display:flex; flex-direction:column;
+    gap:10px; font-size:13px; color:var(--ink-soft)}
+  .steps li{counter-increment:s; display:flex; gap:11px}
+  .steps li::before{content:counter(s,decimal-leading-zero); color:var(--muted); font-size:11px; padding-top:2px}
+  .links{display:flex; gap:18px; flex-wrap:wrap; font-size:12px}
+
+  /* ---- how it works band ---- */
+  .band{border-top:1px solid var(--line); background:#fcfcfc}
+  .band .wrap{padding-block:clamp(44px,7vh,80px)}
+  .band h2{font-family:var(--serif); font-size:clamp(26px,3vw,34px); font-weight:400; margin:0 0 34px}
+  .grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:clamp(20px,3vw,40px)}
+  @media (max-width:760px){ .grid3{grid-template-columns:1fr; gap:26px} }
+  .step{display:flex; flex-direction:column; gap:9px}
+  .step .n{font-size:11px; letter-spacing:.2em; color:var(--muted)}
+  .step .t{font-size:15px; font-weight:500}
+  .step .d{font-size:13px; color:var(--muted); line-height:1.6}
+
+  /* ---- footer ---- */
+  footer{border-top:1px solid var(--line)}
+  footer .wrap{padding-block:28px; display:flex; justify-content:space-between; gap:20px;
+    flex-wrap:wrap; font-size:11px; color:var(--muted); line-height:1.7}
+  footer .priv{max-width:60ch}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap">
+    <div class="brand"><span class="mark">contour<span class="dot"></span></span></div>
+    <div class="navlinks">
+      <a href="#how">How it works</a>
+      <a href="#privacy">Privacy</a>
+      <span>Local-first · Private</span>
+    </div>
+  </div>
+</nav>
+
+<header class="wrap hero">
+  <div class="hero-copy">
+    <p class="eyebrow">Private activity memory</p>
+    <h1 class="head">Building the <em>contour</em><br />for your dense brain.</h1>
+    <p class="lede">A local watcher quietly learns what you're doing and answers by voice —
+      privately, on your machine. Nothing raw ever leaves your device.</p>
+    <ul class="feats">
+      <li><span class="flabel">On-device</span><span class="fdesc">Raw screen &amp; audio never leave your machine — only distilled text you control.</span></li>
+      <li><span class="flabel">Event-driven</span><span class="fdesc">Understands app switches and real changes, not every pixel — so it stores little.</span></li>
+      <li><span class="flabel">Voice-native</span><span class="fdesc">Ask aloud through Hermes; hear answers back in your own ElevenLabs voice.</span></li>
+    </ul>
+  </div>
+
+  <!-- AUTH / DASHBOARD card -->
+  <div>
+    <section class="card" id="auth">
+      <div class="seg" role="tablist">
+        <button role="tab" id="tab-login" aria-selected="true">Sign in</button>
+        <button role="tab" id="tab-signup" aria-selected="false">Create account</button>
+      </div>
+      <form id="form" autocomplete="on">
+        <label>Email
+          <input type="email" id="email" required placeholder="you@example.com" />
+        </label>
+        <label>Password
+          <input type="password" id="password" required minlength="8" placeholder="at least 8 characters" />
+        </label>
+        <button class="btn" id="submit" type="submit">Sign in</button>
+        <p class="msg" id="msg" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="card panel" id="dash">
+      <div class="row">
+        <div class="who">
+          <span class="pill" id="who">connected</span>
+          <button class="btn ghost" id="logout" style="padding:8px 12px">Sign out</button>
+        </div>
+      </div>
+      <div class="row">
+        <span class="k">Your device token</span>
+        <div class="val"><code id="token">—</code><button class="copy" data-copy="token">Copy</button></div>
+      </div>
+      <div class="row">
+        <span class="k">Install (Windows PowerShell)</span>
+        <div class="val"><code id="cmd">—</code><button class="copy" data-copy="cmd">Copy</button></div>
+        <a class="btn ghost" id="download" href="#" style="align-self:flex-start;margin-top:4px">Download install.ps1</a>
+      </div>
+      <div class="row">
+        <span class="k">After install</span>
+        <ol class="steps">
+          <li>Run the command above in PowerShell (needs Hermes Agent + Ollama installed).</li>
+          <li>Grant microphone permission when Windows asks.</li>
+          <li>Say to Hermes: <strong>“what was I just doing?”</strong></li>
+        </ol>
+      </div>
+      <div class="row">
+        <span class="k">Docs</span>
+        <div class="links">
+          <a href="STEPS.md">Setup steps</a>
+          <a href="USER_FLOW.md">User flow</a>
+          <a href="README.md">Readme</a>
+        </div>
+      </div>
+    </section>
+  </div>
+</header>
+
+<section class="band" id="how">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <div class="grid3">
+      <div class="step">
+        <span class="n">01 — Watch</span>
+        <span class="t">Understands your screen</span>
+        <span class="d">A local watcher reacts to app switches and real changes, reads on-screen text, and only escalates to the vision model when it must.</span>
+      </div>
+      <div class="step">
+        <span class="n">02 — Remember</span>
+        <span class="t">Builds a private store</span>
+        <span class="d">Distilled summaries and embeddings live in an on-device store. Near-duplicates are dropped, so it stays small and yours.</span>
+      </div>
+      <div class="step">
+        <span class="n">03 — Answer</span>
+        <span class="t">Speaks when useful</span>
+        <span class="d">Ask by voice through Hermes, or let it surface something worth knowing — spoken back in your ElevenLabs voice.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer id="privacy">
+  <div class="wrap">
+    <span>© 2026 Contour · Building the contour for your dense brain.</span>
+    <span class="priv">Raw screen &amp; audio never leave your device — only distilled text, and only for
+      web search or opt-in cloud escalation, after a client-side scrub. Best-effort privacy, clearly disclosed.</span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var RELAY = window.location.origin && window.location.protocol.startsWith("http")
+    ? window.location.origin : "";
+  var $ = function (id) { return document.getElementById(id); };
+  var mode = "login";
+
+  function setMode(m) {
+    mode = m;
+    $("tab-login").setAttribute("aria-selected", m === "login");
+    $("tab-signup").setAttribute("aria-selected", m === "signup");
+    $("submit").textContent = m === "login" ? "Sign in" : "Create account";
+    say("");
+  }
+  function say(text, ok) {
+    var el = $("msg"); el.textContent = text; el.className = "msg" + (ok ? " ok" : "");
+  }
+  function showDash(token) {
+    $("auth").style.display = "none";
+    $("dash").classList.add("show");
+    $("token").textContent = token;
+    var base = RELAY || "https://YOUR-RELAY";
+    $("cmd").textContent = "irm " + base + "/download/install.ps1 -OutFile install.ps1; "
+      + "./install.ps1 -RelayUrl \"" + base + "\" -DeviceToken \"" + token + "\"";
+    $("download").href = (RELAY || "") + "/download/install.ps1";
+  }
+
+  $("tab-login").onclick = function () { setMode("login"); };
+  $("tab-signup").onclick = function () { setMode("signup"); };
+
+  $("form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var email = $("email").value.trim(), password = $("password").value;
+    $("submit").disabled = true; say("…");
+    fetch(RELAY + "/" + mode, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email, password: password })
+    })
+      .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, b: b }; }); })
+      .then(function (res) {
+        $("submit").disabled = false;
+        if (!res.ok) { say(res.b.detail || "Something went wrong.", false); return; }
+        localStorage.setItem("contour_token", res.b.token);
+        showDash(res.b.token);
+      })
+      .catch(function () { $("submit").disabled = false; say("Can't reach the relay. Is it running?", false); });
+  });
+
+  document.querySelectorAll(".copy").forEach(function (b) {
+    b.onclick = function () {
+      var txt = $(b.getAttribute("data-copy")).textContent;
+      navigator.clipboard.writeText(txt).then(function () {
+        var old = b.textContent; b.textContent = "Copied"; setTimeout(function () { b.textContent = old; }, 1200);
+      });
+    };
+  });
+
+  $("logout").onclick = function () {
+    localStorage.removeItem("contour_token");
+    $("dash").classList.remove("show"); $("auth").style.display = ""; say("");
+  };
+
+  var saved = localStorage.getItem("contour_token");
+  if (saved) { showDash(saved); }
+})();
+</script>
+</body>
+</html>
