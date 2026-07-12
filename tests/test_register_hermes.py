@@ -48,7 +48,8 @@ def test_configure_voice_keeps_stt_disables_hermes_tts(tmp_path):
     register(cfg, block, ask_cloud=False, enable_voice=True)
     d = yaml.safe_load(cfg.read_text(encoding="utf-8"))
     assert d["voice"] == "on"
-    assert d["stt"]["provider"] == "faster-whisper"   # voice INPUT kept (local, no key)
+    assert d["stt"]["provider"] == "elevenlabs"
+    assert d["stt"]["model"] == "scribe_v1"
     # voice OUTPUT is our ElevenLabs speak tool => Hermes' own TTS disabled
     assert d["tts"]["provider"] == "none"
     assert d["tts"]["enabled"] is False

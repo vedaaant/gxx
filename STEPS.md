@@ -37,7 +37,7 @@ early as possible. Checkboxes track remaining work; most code is already built a
 4. [ ] Install **Hermes Agent**: `iex (irm https://hermes-agent.nousresearch.com/install.ps1)`
 5. [ ] Install **Ollama** (https://ollama.com/download) and start it.
 6. [ ] Install **Python 3.10+**. (`uv` optional but nice.)
-7. [ ] Confirm Hermes voice INPUT works: `stt.provider = faster-whisper` (no key). Install
+7. [ ] Confirm Hermes voice INPUT works with ElevenLabs STT (`stt.provider = elevenlabs`). Install
    Hermes voice extras + ffmpeg/portaudio. Voice OUTPUT is ours (ElevenLabs via the `speak`
    tool) — the installer disables Hermes' native TTS, so no manual TTS setup is needed.
 
@@ -48,12 +48,16 @@ early as possible. Checkboxes track remaining work; most code is already built a
      ```powershell
      irm https://RELAY_URL/download/install.ps1 -OutFile install.ps1
      ./install.ps1 -RelayUrl "https://RELAY_URL" -DeviceToken "contour_..."   # -AskCloud to opt in
+     # hosted Gemma 4 option:
+     ./install.ps1 -RelayUrl "https://RELAY_URL" -DeviceToken "contour_..." -InferenceMode hosted -HostedInferenceUrl "https://<hf-endpoint>"
      ```
    - macOS (Terminal):
      ```bash
      curl -fsSL https://RELAY_URL/download/install.sh -o install.sh
      chmod +x install.sh
      ./install.sh --relay-url "https://RELAY_URL" --device-token "contour_..."   # --ask-cloud to opt in
+     # hosted Gemma 4 option:
+     ./install.sh --relay-url "https://RELAY_URL" --device-token "contour_..." --inference-mode hosted --hosted-inference-url "https://<hf-endpoint>"
      ```
     The installer: pulls `gemma4:e4b` + `nomic-embed-text`, installs contour deps, registers the
     MCP server + skill into Hermes, wires the token, and starts the watcher at login

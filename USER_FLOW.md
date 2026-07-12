@@ -16,7 +16,7 @@ Landing/dashboard (single page)
 Dashboard state (same page, no reload)
       │  shows: device token · install one-liner (copy) · Download installer for your OS · next steps
       ▼
-User copies the OS-specific one-liner and runs it
+User picks inference mode (local Gemma 4 or hosted Gemma 4), copies the OS-specific one-liner, and runs it
       │  Windows: irm https://RELAY/download/install.ps1 -OutFile install.ps1
       │           ./install.ps1 -RelayUrl "https://RELAY" -DeviceToken "contour_..."
       │  macOS:   curl -fsSL https://RELAY/download/install.sh -o install.sh
@@ -64,7 +64,7 @@ text and near-duplicates are dropped, so the store stays small and private.
 User (voice): "what error did I hit earlier?" / "which docs was I reading about X?"
    │
    ▼
-Hermes (native Whisper STT) → invokes the contour skill
+Hermes (ElevenLabs STT) → invokes the contour skill
    │
    ├─ mcp_contour_query_datastore(question)  → semantic search over local activity
    └─ (if it needs live info) Hermes native web_search → relay → Linkup

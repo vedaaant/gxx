@@ -18,6 +18,11 @@ DEVICE_TOKEN="${CONTOUR_DEVICE_TOKEN:-}"
 ASK_CLOUD="${CONTOUR_ASK_CLOUD:-false}"
 VISION_MODEL="${CONTOUR_VISION_MODEL:-gemma4:e4b}"
 EMBED_MODEL="${CONTOUR_EMBED_MODEL:-nomic-embed-text}"
+INFERENCE_MODE="${CONTOUR_INFERENCE_MODE:-local}"
+HOSTED_PROVIDER="${CONTOUR_HOSTED_PROVIDER:-hf}"
+HOSTED_INFERENCE_URL="${CONTOUR_HOSTED_INFERENCE_URL:-}"
+HOSTED_INFERENCE_KEY="${CONTOUR_HOSTED_INFERENCE_KEY:-}"
+DEEPINFRA_API_KEY="${DEEPINFRA_API_KEY:-}"
 
 step() { printf "\n[%s] %s\n" "$1" "$2"; }
 warn() { printf "  ! %s\n" "$1"; }
@@ -67,6 +72,11 @@ while [[ $# -gt 0 ]]; do
     --ask-cloud) ASK_CLOUD="true"; shift 1 ;;
     --vision-model) VISION_MODEL="${2:-}"; shift 2 ;;
     --embed-model) EMBED_MODEL="${2:-}"; shift 2 ;;
+    --inference-mode) INFERENCE_MODE="${2:-}"; shift 2 ;;
+    --hosted-provider) HOSTED_PROVIDER="${2:-}"; shift 2 ;;
+    --hosted-inference-url) HOSTED_INFERENCE_URL="${2:-}"; shift 2 ;;
+    --hosted-inference-key) HOSTED_INFERENCE_KEY="${2:-}"; shift 2 ;;
+    --deepinfra-api-key) DEEPINFRA_API_KEY="${2:-}"; shift 2 ;;
     --help|-h)
       cat <<'USAGE'
 Usage: ./install.sh [options]
@@ -75,6 +85,11 @@ Usage: ./install.sh [options]
   --ask-cloud             Enable opt-in ask_cloud path
   --vision-model MODEL    Vision model tag (default gemma4:e4b)
   --embed-model MODEL     Embedding model tag (default nomic-embed-text)
+  --inference-mode MODE   local|hosted (default local)
+  --hosted-provider NAME  hf|deepinfra|openai_compat (default hf)
+  --hosted-inference-url  Hosted inference base URL
+  --hosted-inference-key  Optional bearer token for hosted inference
+  --deepinfra-api-key     Optional DeepInfra API key (used in hosted provider=deepinfra)
 USAGE
       exit 0
       ;;
@@ -87,6 +102,11 @@ done
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   warn "This installer targets macOS. For Windows, use install.ps1."
+fi
+
+if [[ "$INFERENCE_MODE" != "local" && "$INFERENCE_MODE" != "hosted" ]]; then
+  warn "Invalid --inference-mode '$INFERENCE_MODE' (expected local|hosted)"
+  exit 1
 fi
 
 ensure_project_root
@@ -111,9 +131,13 @@ if command -v ollama >/dev/null; then
     nohup ollama serve >/tmp/contour-ollama.log 2>&1 &
     sleep 2
   fi
-  ollama pull "$VISION_MODEL" || warn "Failed to pull $VISION_MODEL"
+  if [[ "$INFERENCE_MODE" == "local" ]]; then
+    ollama pull "$VISION_MODEL" || warn "Failed to pull $VISION_MODEL"
+  else
+    warn "Hosted inference mode selected; skipping local vision model pull"
+  fi
   ollama pull "$EMBED_MODEL" || warn "Failed to pull $EMBED_MODEL"
-  ok "Models requested ($VISION_MODEL, $EMBED_MODEL)"
+  ok "Models requested (vision=${INFERENCE_MODE}, embed=${EMBED_MODEL})"
 fi
 
 step 3 "Installing contour Python dependencies"
@@ -143,13 +167,23 @@ if command -v uv >/dev/null; then
   (cd "$PROJECT_ROOT" && uv run --with pyyaml python install/register_hermes.py \
     --config "$HERMES_CONFIG" --python "$RUNTIME_PYTHON" \
     --relay-url "$RELAY_URL" --token "$DEVICE_TOKEN" \
-    --data-dir "$DATA_DIR" --ask-cloud "$ASK_CLOUD" --enable-voice true)
+    --data-dir "$DATA_DIR" --ask-cloud "$ASK_CLOUD" --enable-voice true \
+    --inference-mode "$INFERENCE_MODE" \
+    --hosted-provider "$HOSTED_PROVIDER" \
+    --hosted-inference-url "$HOSTED_INFERENCE_URL" \
+    --hosted-inference-key "$HOSTED_INFERENCE_KEY" \
+    --deepinfra-api-key "$DEEPINFRA_API_KEY")
 else
   "$PYTHON" -m pip install --user --quiet pyyaml
   "$PYTHON" "${PROJECT_ROOT}/install/register_hermes.py" \
     --config "$HERMES_CONFIG" --python "$RUNTIME_PYTHON" \
     --relay-url "$RELAY_URL" --token "$DEVICE_TOKEN" \
-    --data-dir "$DATA_DIR" --ask-cloud "$ASK_CLOUD" --enable-voice true
+    --data-dir "$DATA_DIR" --ask-cloud "$ASK_CLOUD" --enable-voice true \
+    --inference-mode "$INFERENCE_MODE" \
+    --hosted-provider "$HOSTED_PROVIDER" \
+    --hosted-inference-url "$HOSTED_INFERENCE_URL" \
+    --hosted-inference-key "$HOSTED_INFERENCE_KEY" \
+    --deepinfra-api-key "$DEEPINFRA_API_KEY"
 fi
 mkdir -p "${HERMES_DIR}/skills/contour-activity"
 cp "${PROJECT_ROOT}/skill/SKILL.md" "${HERMES_DIR}/skills/contour-activity/"
@@ -161,6 +195,12 @@ if [[ -n "$RELAY_URL" ]]; then
 else
   warn "No relay URL provided; pass --relay-url and --device-token"
 fi
+if [[ "$INFERENCE_MODE" == "hosted" ]]; then
+  [[ -n "$HOSTED_INFERENCE_URL" ]] && ok "Hosted Gemma inference enabled" || warn "Hosted mode selected but no hosted inference URL provided"
+else
+  ok "Local Gemma inference enabled"
+fi
+ok "STT provider configured via Hermes: ElevenLabs"
 
 step 7 "Device token + cloud opt-in"
 [[ -n "$DEVICE_TOKEN" ]] && ok "Device token wired" || warn "No device token provided"

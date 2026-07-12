@@ -41,6 +41,12 @@ def data_dir() -> Path:
 
 
 # -- models -------------------------------------------------------------------
+INFERENCE_MODE = _env("CONTOUR_INFERENCE_MODE", "local").strip().lower()  # local|hosted
+HOSTED_PROVIDER = _env("CONTOUR_HOSTED_PROVIDER", "hf").strip().lower()  # hf|deepinfra|openai_compat
+HOSTED_INFERENCE_URL = _env("CONTOUR_HOSTED_INFERENCE_URL", "").strip()
+HOSTED_INFERENCE_KEY = _env("CONTOUR_HOSTED_INFERENCE_KEY", "").strip()
+DEEPINFRA_API_KEY = _env("DEEPINFRA_API_KEY", "").strip()
+HOSTED_VISION_MODEL = _env("CONTOUR_HOSTED_VISION_MODEL", "gemma4")
 VISION_MODEL = _env("CONTOUR_VISION_MODEL", "gemma4:e4b")   # doc gemma4:12b as upgrade
 EMBED_MODEL = _env("CONTOUR_EMBED_MODEL", "nomic-embed-text")
 EMBED_DIM = _env_int("CONTOUR_EMBED_DIM", 768)

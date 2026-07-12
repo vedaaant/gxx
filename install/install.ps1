@@ -32,6 +32,12 @@ param(
     [switch]$AskCloud,
     [string]$VisionModel = "gemma4:e4b",
     [string]$EmbedModel = "nomic-embed-text",
+    [ValidateSet("local", "hosted")]
+    [string]$InferenceMode = $(if ($env:CONTOUR_INFERENCE_MODE) { $env:CONTOUR_INFERENCE_MODE } else { "local" }),
+    [string]$HostedProvider = $(if ($env:CONTOUR_HOSTED_PROVIDER) { $env:CONTOUR_HOSTED_PROVIDER } else { "hf" }),
+    [string]$HostedInferenceUrl = $env:CONTOUR_HOSTED_INFERENCE_URL,
+    [string]$HostedInferenceKey = $env:CONTOUR_HOSTED_INFERENCE_KEY,
+    [string]$DeepinfraApiKey = $env:DEEPINFRA_API_KEY,
     [switch]$SkipPrereqs
 )
 
@@ -124,6 +130,11 @@ if (-not $SkipPrereqs -and -not (Test-Admin)) {
     if ($AskCloud)    { $argList += "-AskCloud" }
     if ($VisionModel) { $argList += @("-VisionModel", $VisionModel) }
     if ($EmbedModel)  { $argList += @("-EmbedModel", $EmbedModel) }
+    if ($InferenceMode) { $argList += @("-InferenceMode", $InferenceMode) }
+    if ($HostedProvider) { $argList += @("-HostedProvider", $HostedProvider) }
+    if ($HostedInferenceUrl) { $argList += @("-HostedInferenceUrl", $HostedInferenceUrl) }
+    if ($HostedInferenceKey) { $argList += @("-HostedInferenceKey", $HostedInferenceKey) }
+    if ($DeepinfraApiKey) { $argList += @("-DeepinfraApiKey", $DeepinfraApiKey) }
     try {
         Start-Process powershell.exe -Verb RunAs -ArgumentList $argList
         Warn "Continued in an elevated window. You can close this one."
@@ -188,10 +199,14 @@ if (-not (Have "ollama")) {
         Start-Sleep -Seconds 3
     }
     try { ollama list *> $null } catch { Warn "Ollama not responding yet; start the Ollama app if pulls fail." }
-    Write-Host "  pulling $VisionModel (this can take a while the first time)..."
-    ollama pull $VisionModel
+    if ($InferenceMode -eq "local") {
+        Write-Host "  pulling $VisionModel (this can take a while the first time)..."
+        ollama pull $VisionModel
+    } else {
+        Warn "Hosted inference mode selected; skipping local vision model pull."
+    }
     ollama pull $EmbedModel
-    Ok "Models ready ($VisionModel, $EmbedModel). Tip: gemma4:12b is an optional upgrade."
+    Ok "Models ready (vision=$InferenceMode, embed=$EmbedModel)."
 }
 
 # 3. contour dependencies ---------------------------------------------------------
@@ -213,7 +228,7 @@ if (-not (Have "hermes")) {
     Warn "Hermes not found. Install it first: iex (irm https://hermes-agent.nousresearch.com/install.ps1)"
 } else {
     try { hermes doctor *> $null; Ok "Hermes present" } catch { Warn "hermes doctor reported issues." }
-    Ok "Voice input: Hermes local Whisper STT (no key). Voice output: our ElevenLabs 'speak' tool."
+    Ok "Voice input: ElevenLabs STT via Hermes provider. Voice output: our ElevenLabs 'speak' tool."
     Warn "The installer disables Hermes' native TTS (step 5) so you don't get double audio."
     Warn "Install Hermes voice extras + system deps (portaudio/ffmpeg) if STT isn't working."
 }
@@ -227,14 +242,20 @@ if (Have "uv") {
     uv run --with pyyaml python (Join-Path $ProjectRoot "install\register_hermes.py") `
         --config $HermesConfig --python $RuntimePython `
         --relay-url $RelayUrl --token $DeviceToken `
-        --data-dir $DataDir --ask-cloud $askCloudStr --enable-voice true
+        --data-dir $DataDir --ask-cloud $askCloudStr --enable-voice true `
+        --inference-mode $InferenceMode --hosted-provider $HostedProvider `
+        --hosted-inference-url $HostedInferenceUrl --hosted-inference-key $HostedInferenceKey `
+        --deepinfra-api-key $DeepinfraApiKey
     Pop-Location
 } else {
     python -m pip install --user --quiet pyyaml
     python (Join-Path $ProjectRoot "install\register_hermes.py") `
         --config $HermesConfig --python $RuntimePython `
         --relay-url $RelayUrl --token $DeviceToken `
-        --data-dir $DataDir --ask-cloud $askCloudStr --enable-voice true
+        --data-dir $DataDir --ask-cloud $askCloudStr --enable-voice true `
+        --inference-mode $InferenceMode --hosted-provider $HostedProvider `
+        --hosted-inference-url $HostedInferenceUrl --hosted-inference-key $HostedInferenceKey `
+        --deepinfra-api-key $DeepinfraApiKey
 }
 
 $skillsDir = Join-Path $HermesDir "skills\contour-activity"
@@ -250,6 +271,13 @@ if ($RelayUrl) {
 } else {
     Warn "No RelayUrl given; web search + ask_cloud stay disabled until you pass -RelayUrl / -DeviceToken."
 }
+if ($InferenceMode -eq "hosted") {
+    if ($HostedInferenceUrl) { Ok "Hosted Gemma inference enabled." }
+    else { Warn "Hosted inference mode selected but no HostedInferenceUrl provided." }
+} else {
+    Ok "Local Gemma inference enabled."
+}
+Ok "STT provider configured via Hermes: ElevenLabs"
 
 # 7. Token / opt-in -----------------------------------------------------------
 Step 7 "Device token + cloud opt-in"

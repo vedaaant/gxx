@@ -1,5 +1,6 @@
 import numpy as np
 
+from watcher import config
 from watcher.understand import Understanding
 
 
@@ -62,3 +63,34 @@ def test_embed_handles_batched_and_flat_shapes():
     v2 = u2.embed("doc text")
     assert np.allclose(v2, [1.0, 2.0])
     assert u2._client.last_embed["input"].startswith("search_document: ")
+
+
+def test_describe_uses_hosted_endpoint_when_enabled(monkeypatch):
+    class FakeResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"activity":"hosted path"}'}}]}
+
+    cap = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        cap["url"] = url
+        cap["headers"] = headers
+        cap["json"] = json
+        return FakeResp()
+
+    monkeypatch.setattr(config, "INFERENCE_MODE", "hosted")
+    monkeypatch.setattr(config, "HOSTED_INFERENCE_URL", "https://hf.example")
+    monkeypatch.setattr(config, "HOSTED_INFERENCE_KEY", "tok")
+    monkeypatch.setattr(config, "HOSTED_VISION_MODEL", "gemma4")
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    u = Understanding(client=FakeClient(chat_text='{"activity":"local"}'))
+    out = u.describe(image=b"PNG", uia_text="hello")
+    assert out["activity"] == "hosted path"
+    assert cap["url"].endswith("/v1/chat/completions")
+    assert cap["headers"]["Authorization"] == "Bearer tok"

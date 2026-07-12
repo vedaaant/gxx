@@ -45,6 +45,13 @@ def build_block(python: str, data_dir: str, relay_url: str, token: str, ask_clou
             "CONTOUR_RELAY_URL": relay_url,
             "CONTOUR_DEVICE_TOKEN": token,
             "CONTOUR_ASK_CLOUD": "true" if ask_cloud else "false",
+            "CONTOUR_INFERENCE_MODE": os.environ.get("CONTOUR_INFERENCE_MODE", "local"),
+            "CONTOUR_HOSTED_PROVIDER": os.environ.get("CONTOUR_HOSTED_PROVIDER", "hf"),
+            "CONTOUR_HOSTED_INFERENCE_URL": os.environ.get("CONTOUR_HOSTED_INFERENCE_URL", ""),
+            "CONTOUR_HOSTED_INFERENCE_KEY": os.environ.get("CONTOUR_HOSTED_INFERENCE_KEY", ""),
+            "DEEPINFRA_API_KEY": os.environ.get("DEEPINFRA_API_KEY", ""),
+            "CONTOUR_STT_PROVIDER": os.environ.get("CONTOUR_STT_PROVIDER", "elevenlabs"),
+            "ELEVENLABS_STT_MODEL": os.environ.get("ELEVENLABS_STT_MODEL", "scribe_v1"),
         },
         "tools": {
             "include": [
@@ -58,22 +65,33 @@ def build_block(python: str, data_dir: str, relay_url: str, token: str, ask_clou
     }
 
 
-def configure_voice(data: dict) -> None:
-    """Voice input via Hermes' local Whisper STT (no key); voice OUTPUT via our
-    ElevenLabs `speak` tool, so Hermes' own TTS is disabled to avoid double audio.
+def configure_voice(data: dict, stt_provider: str = "elevenlabs", elevenlabs_stt_model: str = "scribe_v1") -> None:
+    """Configure voice IO:
+    - STT via chosen provider (default ElevenLabs)
+    - TTS via contour's ElevenLabs `speak` tool (Hermes native TTS disabled)
 
     Only fills in these providers; leaves any other voice settings the user has.
     NOTE: Hermes' exact "disable TTS" key is confirmed at install; we set the two
     plausible forms and the installer prints a reminder to verify.
     """
     data["voice"] = "on"
-    data.setdefault("stt", {})["provider"] = "faster-whisper"
+    stt = data.setdefault("stt", {})
+    stt["provider"] = stt_provider
+    if stt_provider == "elevenlabs":
+        stt.setdefault("model", elevenlabs_stt_model)
     tts = data.setdefault("tts", {})
     tts["provider"] = "none"   # do not let Hermes speak; contour speaks via ElevenLabs
     tts["enabled"] = False
 
 
-def register(config_path: Path, block: dict, ask_cloud: bool, enable_voice: bool = False) -> None:
+def register(
+    config_path: Path,
+    block: dict,
+    ask_cloud: bool,
+    enable_voice: bool = False,
+    stt_provider: str = "elevenlabs",
+    elevenlabs_stt_model: str = "scribe_v1",
+) -> None:
     try:
         import yaml
     except ImportError:
@@ -89,13 +107,15 @@ def register(config_path: Path, block: dict, ask_cloud: bool, enable_voice: bool
     skills = data.setdefault("skills", {})
     skills.setdefault("config", {})["ask_cloud"] = ask_cloud
     if enable_voice:
-        configure_voice(data)
+        configure_voice(data, stt_provider=stt_provider, elevenlabs_stt_model=elevenlabs_stt_model)
 
     with config_path.open("w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
     print(f"registered contour MCP server in {config_path}")
     if enable_voice:
-        print("configured voice (faster-whisper STT; Hermes TTS off — contour speaks via ElevenLabs)")
+        print(
+            f"configured voice ({stt_provider} STT; Hermes TTS off — contour speaks via ElevenLabs)"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -107,12 +127,42 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--data-dir", default=default_data_dir())
     p.add_argument("--ask-cloud", default="false")
     p.add_argument("--enable-voice", default="false")
+    p.add_argument("--stt-provider", default=os.environ.get("CONTOUR_STT_PROVIDER", "elevenlabs"))
+    p.add_argument("--elevenlabs-stt-model", default=os.environ.get("ELEVENLABS_STT_MODEL", "scribe_v1"))
+    p.add_argument("--inference-mode", default=os.environ.get("CONTOUR_INFERENCE_MODE", "local"))
+    p.add_argument("--hosted-provider", default=os.environ.get("CONTOUR_HOSTED_PROVIDER", "hf"))
+    p.add_argument(
+        "--hosted-inference-url",
+        default=os.environ.get("CONTOUR_HOSTED_INFERENCE_URL", ""),
+    )
+    p.add_argument(
+        "--hosted-inference-key",
+        default=os.environ.get("CONTOUR_HOSTED_INFERENCE_KEY", ""),
+    )
+    p.add_argument(
+        "--deepinfra-api-key",
+        default=os.environ.get("DEEPINFRA_API_KEY", ""),
+    )
     args = p.parse_args(argv)
 
     ask_cloud = args.ask_cloud.strip().lower() in {"1", "true", "yes", "on"}
     enable_voice = args.enable_voice.strip().lower() in {"1", "true", "yes", "on"}
+    os.environ["CONTOUR_INFERENCE_MODE"] = (args.inference_mode or "local").strip().lower()
+    os.environ["CONTOUR_HOSTED_PROVIDER"] = (args.hosted_provider or "hf").strip().lower()
+    os.environ["CONTOUR_HOSTED_INFERENCE_URL"] = (args.hosted_inference_url or "").strip()
+    os.environ["CONTOUR_HOSTED_INFERENCE_KEY"] = (args.hosted_inference_key or "").strip()
+    os.environ["DEEPINFRA_API_KEY"] = (args.deepinfra_api_key or "").strip()
+    os.environ["CONTOUR_STT_PROVIDER"] = (args.stt_provider or "elevenlabs").strip().lower()
+    os.environ["ELEVENLABS_STT_MODEL"] = (args.elevenlabs_stt_model or "scribe_v1").strip()
     block = build_block(args.python, args.data_dir, args.relay_url, args.token, ask_cloud)
-    register(args.config, block, ask_cloud, enable_voice)
+    register(
+        args.config,
+        block,
+        ask_cloud,
+        enable_voice,
+        stt_provider=os.environ["CONTOUR_STT_PROVIDER"],
+        elevenlabs_stt_model=os.environ["ELEVENLABS_STT_MODEL"],
+    )
     return 0
 
 

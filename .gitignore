@@ -13,3 +13,4 @@ venv/
 activity.*
 .env
 relay_local.log
+vercel.env

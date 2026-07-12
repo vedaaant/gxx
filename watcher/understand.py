@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import base64
 
 import numpy as np
 
@@ -51,6 +52,9 @@ class Understanding:
     # -- vision ---------------------------------------------------------------
     def describe(self, image: bytes | str, uia_text: str = "") -> dict:
         """Return a structured summary dict. ``image`` = PNG bytes or a file path."""
+        if config.INFERENCE_MODE == "hosted" and config.HOSTED_INFERENCE_URL:
+            raw = self._describe_hosted(image, uia_text)
+            return self._parse(raw)
         content = _DESCRIBE_PROMPT
         if uia_text:
             content += f"\n\nExtracted on-screen text (may be partial):\n{uia_text[:4000]}"
@@ -61,6 +65,64 @@ class Understanding:
         )
         raw = resp["message"]["content"]
         return self._parse(raw)
+
+    def _describe_hosted(self, image: bytes | str, uia_text: str = "") -> str:
+        import httpx
+
+        prompt = _DESCRIBE_PROMPT
+        if uia_text:
+            prompt += f"\n\nExtracted on-screen text (may be partial):\n{uia_text[:4000]}"
+
+        if isinstance(image, bytes):
+            img_bytes = image
+        else:
+            with open(image, "rb") as f:
+                img_bytes = f.read()
+        data_url = "data:image/png;base64," + base64.b64encode(img_bytes).decode("ascii")
+
+        base = config.HOSTED_INFERENCE_URL.rstrip("/")
+        if base.endswith("/v1/openai"):
+            url = f"{base}/chat/completions"
+        elif base.endswith("/v1"):
+            url = f"{base}/chat/completions"
+        else:
+            url = f"{base}/v1/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        api_key = config.HOSTED_INFERENCE_KEY
+        if not api_key and config.HOSTED_PROVIDER == "deepinfra":
+            api_key = config.DEEPINFRA_API_KEY
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        payload = {
+            "model": config.HOSTED_VISION_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+            "temperature": 0.2,
+        }
+        try:
+            resp = httpx.post(url, headers=headers, json=payload, timeout=45)
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+        except Exception as e:  # noqa: BLE001
+            log.warning("hosted describe failed (%s), falling back to local Ollama", e)
+            content = _DESCRIBE_PROMPT
+            if uia_text:
+                content += f"\n\nExtracted on-screen text (may be partial):\n{uia_text[:4000]}"
+            resp = self.client.chat(
+                model=config.VISION_MODEL,
+                messages=[{"role": "user", "content": content, "images": [image]}],
+                options={"temperature": 0.2},
+            )
+            return resp["message"]["content"]
 
     @staticmethod
     def _parse(raw: str) -> dict:
